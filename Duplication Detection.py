@@ -273,6 +273,82 @@ st.markdown("""
         font-size: 0.9em;
         border-top: 1px solid rgba(0, 133, 113, 0.2);
     }
+    
+    /* Step indicator */
+    .step-indicator {
+        display: flex;
+        justify-content: space-between;
+        margin: 30px 0;
+        position: relative;
+    }
+    
+    .step-indicator::before {
+        content: '';
+        position: absolute;
+        top: 15px;
+        left: 10%;
+        right: 10%;
+        height: 3px;
+        background: rgba(0, 133, 113, 0.2);
+        z-index: 1;
+    }
+    
+    .step {
+        background: white;
+        border: 3px solid rgba(0, 133, 113, 0.3);
+        border-radius: 50%;
+        width: 35px;
+        height: 35px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: var(--primary);
+        position: relative;
+        z-index: 2;
+    }
+    
+    .step.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary-dark);
+    }
+    
+    .step-label {
+        position: absolute;
+        top: 40px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        font-size: 0.8em;
+        color: var(--gray);
+    }
+    
+    /* Feature cards */
+    .feature-card {
+        background: white;
+        padding: 25px;
+        border-radius: 15px;
+        border: 2px solid rgba(0, 133, 113, 0.1);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+        text-align: center;
+        transition: transform 0.3s ease;
+        height: 100%;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-5px);
+        border-color: var(--primary);
+    }
+    
+    /* Welcome card */
+    .welcome-card {
+        background: linear-gradient(135deg, rgba(0, 133, 113, 0.1), rgba(184, 209, 36, 0.1));
+        padding: 30px;
+        border-radius: 20px;
+        border: 3px solid var(--primary);
+        margin: 20px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -608,6 +684,28 @@ def register_session_cleanup():
     if 'temp_dir' in st.session_state:
         atexit.register(cleanup_temp_directory, st.session_state.temp_dir)
 
+def create_step_indicator(current_step):
+    """Create visual step indicator"""
+    steps = [
+        {"number": 1, "label": "Upload Zip", "description": "Upload your images zip file"},
+        {"number": 2, "label": "Configure", "description": "Set detection settings"},
+        {"number": 3, "label": "Scan", "description": "Find duplicate images"},
+        {"number": 4, "label": "Manage", "description": "Review & export results"}
+    ]
+    
+    html = '<div class="step-indicator">'
+    for step in steps:
+        active_class = "active" if step["number"] == current_step else ""
+        html += f'''
+        <div style="position: relative; text-align: center; flex: 1;">
+            <div class="step {active_class}">{step["number"]}</div>
+            <div class="step-label"><strong>{step["label"]}</strong></div>
+            <div style="margin-top: 60px; font-size: 0.85em; color: var(--gray);">{step["description"]}</div>
+        </div>
+        '''
+    html += '</div>'
+    return html
+
 def main():
     # Initialize session state
     if 'duplicates' not in st.session_state:
@@ -630,11 +728,16 @@ def main():
         st.session_state.zip_filename = None
     if 'image_count' not in st.session_state:
         st.session_state.image_count = 0
+    if 'current_step' not in st.session_state:
+        st.session_state.current_step = 1
     
-    # Custom header
+    # Custom header - Single unified header
     st.markdown("""
     <div class="main-header">
-        <h1 style="margin: 0; font-size: 2.5em;">🔍 Smart Duplicate Image Finder</h1>
+        <h1 style="margin: 0; font-size: 2.5em; display: flex; align-items: center; justify-content: center; gap: 15px;">
+            <span>🔍</span>
+            <span>Smart Duplicate Image Finder</span>
+        </h1>
         <p style="margin: 10px 0 0 0; font-size: 1.2em; opacity: 0.9;">
             Upload a zip file of images to find duplicates with similarity analysis
         </p>
@@ -645,93 +748,111 @@ def main():
     with st.sidebar:
         st.markdown("### ⚙️ Configuration")
         
-        # Zip file upload
-        st.markdown("#### 1. Upload Zip File")
-        st.markdown('<div class="upload-area">', unsafe_allow_html=True)
-        zip_file = st.file_uploader(
-            "Choose a zip file",
-            type=['zip'],
-            help="Upload a zip file containing images",
-            label_visibility="collapsed"
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        if zip_file:
-            is_valid, message = validate_zip_file(zip_file)
-            
-            if is_valid:
-                st.success(f"✅ {message}")
-                
-                if st.button("📂 Extract & Process", use_container_width=True, type="primary"):
-                    with st.spinner("Extracting zip file..."):
-                        # Create temp directory
-                        temp_dir = tempfile.mkdtemp()
-                        st.session_state.temp_dir = temp_dir
-                        
-                        # Save zip file
-                        zip_path = os.path.join(temp_dir, "uploaded.zip")
-                        with open(zip_path, "wb") as f:
-                            f.write(zip_file.getvalue())
-                        
-                        # Extract zip
-                        try:
-                            image_count = extract_zip_file(zip_path, temp_dir)
-                            st.session_state.image_count = image_count
-                            st.session_state.zip_filename = zip_file.name
-                            
-                            if image_count == 0:
-                                st.error("No images found in zip file!")
-                                cleanup_temp_directory(temp_dir)
-                            elif image_count > MAX_TOTAL_IMAGES:
-                                st.error(f"Too many images ({image_count}). Maximum: {MAX_TOTAL_IMAGES}")
-                                cleanup_temp_directory(temp_dir)
-                            else:
-                                st.success(f"✅ Extracted {image_count} images")
-                                st.session_state.scan_complete = False
-                        except Exception as e:
-                            st.error(f"❌ Error extracting zip: {str(e)}")
-                            cleanup_temp_directory(temp_dir)
-            else:
-                st.error(f"❌ {message}")
-        
-        # Detection settings
-        st.markdown("#### 2. Detection Settings")
-        method = st.selectbox(
-            "Detection Method:",
-            options=['phash', 'md5', 'average_hash', 'dhash'],
-            index=0,
-            help="phash: Best for similar images | md5: Exact duplicates only"
-        )
-        
-        if method != 'md5':
-            col1, col2 = st.columns(2)
-            with col1:
-                threshold = st.slider(
-                    "Hash Threshold:",
-                    min_value=0,
-                    max_value=64,
-                    value=5,
-                    help="Lower = more strict"
-                )
-            with col2:
-                similarity_threshold = st.slider(
-                    "Similarity (%):",
-                    min_value=0,
-                    max_value=100,
-                    value=80,
-                    help="Minimum similarity to mark as duplicate"
-                )
+        # Step indicator in sidebar
+        current_step = st.session_state.current_step
+        if current_step == 1:
+            st.markdown("#### 📤 Step 1: Upload Zip File")
+        elif current_step == 2:
+            st.markdown("#### ⚙️ Step 2: Configure Settings")
+        elif current_step == 3:
+            st.markdown("#### 🔍 Step 3: Scan & Analyze")
         else:
-            threshold = 0
-            similarity_threshold = 100
+            st.markdown("#### 📊 Step 4: Results & Export")
         
-        # Action buttons
-        st.markdown("#### 3. Actions")
+        # Zip file upload - Only show in step 1
+        if current_step == 1 or not st.session_state.temp_dir:
+            st.markdown('<div class="upload-area">', unsafe_allow_html=True)
+            zip_file = st.file_uploader(
+                "📦 Choose or drag & drop a zip file",
+                type=['zip'],
+                help="Upload a zip file containing your images",
+                label_visibility="collapsed"
+            )
+            st.markdown('<p style="font-size: 0.9em; color: var(--gray); margin-top: 10px;">'
+                       '💡 Tip: Zip your image folder before uploading</p>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            if zip_file:
+                is_valid, message = validate_zip_file(zip_file)
+                
+                if is_valid:
+                    st.success(f"✅ {message}")
+                    
+                    if st.button("📂 Extract Images", use_container_width=True, type="primary"):
+                        with st.spinner("Extracting zip file..."):
+                            # Create temp directory
+                            temp_dir = tempfile.mkdtemp()
+                            st.session_state.temp_dir = temp_dir
+                            
+                            # Save zip file
+                            zip_path = os.path.join(temp_dir, "uploaded.zip")
+                            with open(zip_path, "wb") as f:
+                                f.write(zip_file.getvalue())
+                            
+                            # Extract zip
+                            try:
+                                image_count = extract_zip_file(zip_path, temp_dir)
+                                st.session_state.image_count = image_count
+                                st.session_state.zip_filename = zip_file.name
+                                
+                                if image_count == 0:
+                                    st.error("❌ No images found in zip file!")
+                                    cleanup_temp_directory(temp_dir)
+                                    st.session_state.temp_dir = None
+                                elif image_count > MAX_TOTAL_IMAGES:
+                                    st.error(f"❌ Too many images ({image_count}). Maximum: {MAX_TOTAL_IMAGES}")
+                                    cleanup_temp_directory(temp_dir)
+                                    st.session_state.temp_dir = None
+                                else:
+                                    st.success(f"✅ Extracted {image_count} images")
+                                    st.session_state.scan_complete = False
+                                    st.session_state.current_step = 2
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error extracting zip: {str(e)}")
+                                cleanup_temp_directory(temp_dir)
+                                st.session_state.temp_dir = None
+                else:
+                    st.error(f"❌ {message}")
         
-        if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
-            scan_col, clear_col = st.columns(2)
-            with scan_col:
+        # Detection settings - Show in step 2 or later
+        if st.session_state.temp_dir and (current_step >= 2 or st.session_state.image_count > 0):
+            st.markdown("#### 🔍 Detection Settings")
+            method = st.selectbox(
+                "Detection Method:",
+                options=['phash', 'md5', 'average_hash', 'dhash'],
+                index=0,
+                help="• phash: Best for similar images (recommended)\n• md5: Exact duplicates only\n• average_hash: Faster but less accurate\n• dhash: Good for resized images"
+            )
+            
+            if method != 'md5':
+                col1, col2 = st.columns(2)
+                with col1:
+                    threshold = st.slider(
+                        "Hash Threshold:",
+                        min_value=0,
+                        max_value=64,
+                        value=5,
+                        help="Lower = more strict matching"
+                    )
+                with col2:
+                    similarity_threshold = st.slider(
+                        "Similarity (%):",
+                        min_value=50,
+                        max_value=100,
+                        value=80,
+                        help="Minimum similarity to mark as duplicate"
+                    )
+            else:
+                threshold = 0
+                similarity_threshold = 100
+            
+            # Action buttons
+            st.markdown("#### 🚀 Actions")
+            
+            if not st.session_state.scan_complete:
                 if st.button("🔍 Start Scan", use_container_width=True, type="primary"):
+                    st.session_state.current_step = 3
                     with st.spinner("🚀 Scanning for duplicates..."):
                         finder = DuplicateImageFinder(
                             st.session_state.temp_dir,
@@ -754,11 +875,13 @@ def main():
                         st.session_state.similarity_scores = similarity_scores
                         st.session_state.best_matches = best_matches
                         st.session_state.scan_complete = True
+                        st.session_state.current_step = 4
                     
                     st.success("✅ Scan completed!")
                     st.rerun()
             
-            with clear_col:
+            # Clear button
+            if st.session_state.scan_complete or st.session_state.image_count > 0:
                 if st.button("🗑️ Clear All", use_container_width=True):
                     # Clean up
                     if st.session_state.temp_dir:
@@ -766,102 +889,114 @@ def main():
                     
                     # Reset session state
                     for key in ['duplicates', 'hash_values', 'similarity_scores', 'best_matches',
-                               'files_to_delete', 'temp_dir', 'zip_filename', 'image_count']:
+                               'files_to_delete', 'temp_dir', 'zip_filename', 'image_count', 'current_step']:
                         if key in st.session_state:
-                            st.session_state[key] = None if key == 'temp_dir' else {} if key == 'files_to_delete' else set() if key == 'files_to_delete' else 0 if key == 'image_count' else {}
+                            st.session_state[key] = None if key == 'temp_dir' else {} if key == 'files_to_delete' else set() if key == 'files_to_delete' else 1 if key == 'current_step' else 0 if key == 'image_count' else {}
                     
                     st.session_state.scan_complete = False
                     st.rerun()
         
         # Statistics
-        st.markdown("#### 📊 Statistics")
-        if st.session_state.duplicates:
-            total_duplicates = sum(len(dup_list) for dup_list in st.session_state.duplicates.values())
-            avg_similarity = 0
-            count = 0
+        if st.session_state.image_count > 0:
+            st.markdown("#### 📊 Statistics")
             
-            for original, scores in st.session_state.similarity_scores.items():
-                for dup, score in scores.items():
-                    avg_similarity += score
-                    count += 1
-            
-            if count > 0:
-                avg_similarity = avg_similarity / count
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <div style="font-size: 0.9em; color: #4D4D4D;">Total Images</div>
-                <div style="font-size: 1.8em; font-weight: bold; color: #008571;">{st.session_state.image_count}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <div style="font-size: 0.9em; color: #4D4D4D;">Total Duplicates</div>
-                <div style="font-size: 1.8em; font-weight: bold; color: #1E5050;">{total_duplicates}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <div style="font-size: 0.9em; color: #4D4D4D;">Avg Similarity</div>
-                <div style="font-size: 1.8em; font-weight: bold; color: #B8D124;">{avg_similarity:.1f}%</div>
-            </div>
-            """, unsafe_allow_html=True)
-        elif st.session_state.image_count > 0:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div style="font-size: 0.9em; color: #4D4D4D;">Images Ready</div>
-                <div style="font-size: 1.8em; font-weight: bold; color: #008571;">{st.session_state.image_count}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            if st.session_state.duplicates:
+                total_duplicates = sum(len(dup_list) for dup_list in st.session_state.duplicates.values())
+                avg_similarity = 0
+                count = 0
+                
+                for original, scores in st.session_state.similarity_scores.items():
+                    for dup, score in scores.items():
+                        avg_similarity += score
+                        count += 1
+                
+                if count > 0:
+                    avg_similarity = avg_similarity / count
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="font-size: 0.9em; color: #4D4D4D;">Total Images</div>
+                    <div style="font-size: 1.8em; font-weight: bold; color: #008571;">{st.session_state.image_count}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="font-size: 0.9em; color: #4D4D4D;">Total Duplicates</div>
+                    <div style="font-size: 1.8em; font-weight: bold; color: #1E5050;">{total_duplicates}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="font-size: 0.9em; color: #4D4D4D;">Avg Similarity</div>
+                    <div style="font-size: 1.8em; font-weight: bold; color: #B8D124;">{avg_similarity:.1f}%</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="font-size: 0.9em; color: #4D4D4D;">Images Ready</div>
+                    <div style="font-size: 1.8em; font-weight: bold; color: #008571;">{st.session_state.image_count}</div>
+                    <div style="font-size: 0.8em; color: var(--gray); margin-top: 5px;">
+                        Click "Start Scan" to begin analysis
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
         
         # Info box
         st.markdown("""
         <div class="info-box">
-            <strong>ℹ️ Supported formats:</strong>
-            <br>PNG, JPG, JPEG, BMP, GIF, TIFF, WEBP, JFIF, HEIC, AVIF
-            <br><br><strong>📦 Max zip size:</strong> {MAX_ZIP_SIZE_MB}MB
-            <br><strong>🖼️ Max images:</strong> {MAX_TOTAL_IMAGES}
+            <strong>📋 Quick Guide:</strong>
+            <ol style="margin: 10px 0; padding-left: 20px; font-size: 0.9em;">
+                <li>Upload zip with images</li>
+                <li>Configure detection settings</li>
+                <li>Start scan</li>
+                <li>Review & export results</li>
+            </ol>
+            <div style="font-size: 0.85em; color: var(--gray); margin-top: 10px;">
+                <strong>📁 Supported formats:</strong> PNG, JPG, JPEG, WEBP, GIF, BMP, TIFF
+                <br><strong>📦 Max zip size:</strong> {MAX_ZIP_SIZE_MB}MB
+                <br><strong>🖼️ Max images:</strong> {MAX_TOTAL_IMAGES}
+            </div>
         </div>
         """.format(MAX_ZIP_SIZE_MB=MAX_ZIP_SIZE_MB, MAX_TOTAL_IMAGES=MAX_TOTAL_IMAGES), unsafe_allow_html=True)
     
     # Main content area
+    # Show step indicator
+    if st.session_state.current_step > 1:
+        st.markdown(create_step_indicator(st.session_state.current_step), unsafe_allow_html=True)
+    
     if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
         # Show current session info
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
+        if st.session_state.current_step >= 2:
             st.markdown(f"""
-            <div style="background: rgba(0, 133, 113, 0.1); padding: 15px; border-radius: 10px; border-left: 5px solid #008571;">
-                <strong>📦 Current Archive:</strong> <code>{st.session_state.zip_filename}</code><br>
-                <strong>🖼️ Images Found:</strong> {st.session_state.image_count} images
+            <div style="background: rgba(0, 133, 113, 0.1); padding: 20px; border-radius: 12px; margin: 20px 0; border-left: 5px solid #008571;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong style="font-size: 1.1em;">📁 Current Session:</strong>
+                        <div style="margin-top: 8px;">
+                            <span style="color: var(--primary);">📦 Archive:</span> <code>{st.session_state.zip_filename}</code>
+                            <br><span style="color: var(--primary);">🖼️ Images:</span> {st.session_state.image_count} images found
+                            <br><span style="color: var(--primary);">⚙️ Method:</span> {'MD5 (Exact)' if 'method' not in locals() or method == 'md5' else 'Perceptual Hash'}
+                        </div>
+                    </div>
+                    <div>
+                        <button onclick="window.location.reload();" style="background: rgba(255, 255, 255, 0.9); border: 2px solid var(--primary); color: var(--primary-dark); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.3s;">
+                            🔄 New Session
+                        </button>
+                    </div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
         
-        with col2:
-            if st.button("🔄 New Upload", use_container_width=True):
-                if st.session_state.temp_dir:
-                    cleanup_temp_directory(st.session_state.temp_dir)
-                st.session_state.temp_dir = None
-                st.session_state.scan_complete = False
-                st.rerun()
-        
-        with col3:
-            if st.session_state.scan_complete:
-                if st.button("🔄 Rescan", use_container_width=True):
-                    st.session_state.duplicates = {}
-                    st.session_state.similarity_scores = {}
-                    st.session_state.best_matches = {}
-                    st.session_state.files_to_delete = set()
-                    st.rerun()
-        
-        # Display results
+        # Display results or ready state
         if st.session_state.duplicates:
             total_duplicates = sum(len(dup_list) for dup_list in st.session_state.duplicates.values())
             
             st.markdown(f"""
             <div style="text-align: center; margin: 25px 0;">
-                <h2 style="color: #1E5050;">📋 Analysis Results</h2>
+                <h2 style="color: #1E5050;">🎯 Analysis Complete!</h2>
                 <p style="font-size: 1.2em;">
                     Found <span style="color: #008571; font-weight: bold;">{total_duplicates}</span> duplicate files in 
                     <span style="color: #1E5050; font-weight: bold;">{len(st.session_state.duplicates)}</span> groups
@@ -870,88 +1005,98 @@ def main():
             """, unsafe_allow_html=True)
             
             # Create tabs
-            tab1, tab2, tab3, tab4 = st.tabs(["📸 Visual Groups", "📊 Similarity Analysis", "🏆 Best Matches", "🗂️ File Management"])
+            tab1, tab2, tab3, tab4 = st.tabs(["📸 Visual Groups", "📊 Similarity Analysis", "🏆 Best Matches", "📥 Export Results"])
             
             with tab1:
                 # Display each duplicate group
-                for idx, (original, duplicates_list) in enumerate(st.session_state.duplicates.items()):
-                    with st.container():
-                        st.markdown(f'<div class="duplicate-group">', unsafe_allow_html=True)
-                        
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.markdown(f"### 🏷️ Group {idx+1}")
-                            st.markdown(f"**Original:** `{original}`")
-                            st.markdown(f"*{len(duplicates_list)} duplicate(s) found*")
-                        
-                        with col2:
-                            original_path = os.path.join(st.session_state.temp_dir, original)
-                            original_size = get_file_size(original_path)
-                            st.markdown(f"""
-                            <div style="text-align: right;">
-                                <div style="font-size: 0.9em; color: #4D4D4D;">File Size</div>
-                                <div style="font-size: 1.2em; font-weight: bold; color: #008571;">{original_size}</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
-                        # Display similarity scores
-                        if original in st.session_state.similarity_scores:
-                            st.markdown("**Similarity Scores:**")
-                            for dup in duplicates_list:
-                                similarity = st.session_state.similarity_scores[original].get(dup, 0)
-                                meter_html, _ = create_similarity_meter(similarity)
-                                st.markdown(meter_html, unsafe_allow_html=True)
-                        
-                        # Display images in a grid
-                        all_files = [original] + duplicates_list
-                        st.markdown('<div class="image-grid">', unsafe_allow_html=True)
-                        
-                        cols = st.columns(min(len(all_files), 5))
-                        for i, filename in enumerate(all_files):
-                            filepath = os.path.join(st.session_state.temp_dir, filename)
-                            img_base64 = get_image_base64(filepath)
+                if len(st.session_state.duplicates) == 0:
+                    st.markdown("""
+                    <div style="text-align: center; padding: 50px; background: rgba(184, 209, 36, 0.1); border-radius: 15px; margin: 20px 0;">
+                        <h3 style="color: #1E5050;">🎉 No Duplicates Found!</h3>
+                        <p style="font-size: 1.1em; color: #4D4D4D;">
+                            Your image collection appears to be clean with no duplicate images.
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    for idx, (original, duplicates_list) in enumerate(st.session_state.duplicates.items()):
+                        with st.container():
+                            st.markdown(f'<div class="duplicate-group">', unsafe_allow_html=True)
                             
-                            with cols[i % len(cols)]:
-                                if img_base64:
-                                    # Show similarity badge for duplicates
-                                    badge_html = ""
-                                    if i > 0:  # Not the original
-                                        similarity = st.session_state.similarity_scores.get(original, {}).get(filename, 0)
-                                        if similarity > 0:
-                                            badge_color = get_badge_color(similarity)
-                                            badge_html = f'<div class="match-badge" style="background: {badge_color};">{similarity:.0f}%</div>'
-                                    
-                                    st.markdown(f"""
-                                    <div class="image-container">
-                                        {badge_html if badge_html else ""}
-                                        <img src="data:image/png;base64,{img_base64}" 
-                                             style="width:100%; height:auto; border-radius:8px;">
-                                        <div style="padding:10px; font-size:0.8em;">
-                                            <div style="color: {'#008571' if i==0 else '#FF5722'}; font-weight: bold; margin-bottom: 5px;">
-                                                {'🟢 Original' if i==0 else '🔴 Duplicate'}
-                                            </div>
-                                            <div style="word-break: break-all; font-size: 0.75em; margin-bottom: 5px;">{filename[-30:]}</div>
-                                            <span class="file-size">{get_file_size(filepath)}</span>
-                                        </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.markdown(f"### 🏷️ Group {idx+1}")
+                                st.markdown(f"**Original:** `{original}`")
+                                st.markdown(f"*{len(duplicates_list)} duplicate(s) found*")
+                            
+                            with col2:
+                                original_path = os.path.join(st.session_state.temp_dir, original)
+                                original_size = get_file_size(original_path)
+                                st.markdown(f"""
+                                <div style="text-align: right;">
+                                    <div style="font-size: 0.9em; color: #4D4D4D;">File Size</div>
+                                    <div style="font-size: 1.2em; font-weight: bold; color: #008571;">{original_size}</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Display similarity scores
+                            if original in st.session_state.similarity_scores:
+                                st.markdown("**Similarity Scores:**")
+                                for dup in duplicates_list:
+                                    similarity = st.session_state.similarity_scores[original].get(dup, 0)
+                                    meter_html, _ = create_similarity_meter(similarity)
+                                    st.markdown(meter_html, unsafe_allow_html=True)
+                            
+                            # Display images in a grid
+                            all_files = [original] + duplicates_list
+                            st.markdown('<div class="image-grid">', unsafe_allow_html=True)
+                            
+                            cols = st.columns(min(len(all_files), 5))
+                            for i, filename in enumerate(all_files):
+                                filepath = os.path.join(st.session_state.temp_dir, filename)
+                                img_base64 = get_image_base64(filepath)
                                 
-                                # Checkbox for selection
-                                if filename != original:
-                                    checkbox_key = f"del_{hash(filename)}_{idx}"
-                                    is_checked = st.checkbox(
-                                        f"Select {filename[:20]}...", 
-                                        key=checkbox_key,
-                                        help=f"Select to mark {filename} for deletion"
-                                    )
+                                with cols[i % len(cols)]:
+                                    if img_base64:
+                                        # Show similarity badge for duplicates
+                                        badge_html = ""
+                                        if i > 0:  # Not the original
+                                            similarity = st.session_state.similarity_scores.get(original, {}).get(filename, 0)
+                                            if similarity > 0:
+                                                badge_color = get_badge_color(similarity)
+                                                badge_html = f'<div class="match-badge" style="background: {badge_color};">{similarity:.0f}%</div>'
+                                        
+                                        st.markdown(f"""
+                                        <div class="image-container">
+                                            {badge_html if badge_html else ""}
+                                            <img src="data:image/png;base64,{img_base64}" 
+                                                 style="width:100%; height:auto; border-radius:8px;">
+                                            <div style="padding:10px; font-size:0.8em;">
+                                                <div style="color: {'#008571' if i==0 else '#FF5722'}; font-weight: bold; margin-bottom: 5px;">
+                                                    {'🟢 Original' if i==0 else '🔴 Duplicate'}
+                                                </div>
+                                                <div style="word-break: break-all; font-size: 0.75em; margin-bottom: 5px;">{filename[-30:]}</div>
+                                                <span class="file-size">{get_file_size(filepath)}</span>
+                                            </div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
                                     
-                                    if is_checked:
-                                        st.session_state.files_to_delete.add(filename)
-                                    elif filename in st.session_state.files_to_delete:
-                                        st.session_state.files_to_delete.remove(filename)
-                        
-                        st.markdown('</div>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
+                                    # Checkbox for selection
+                                    if filename != original:
+                                        checkbox_key = f"del_{hash(filename)}_{idx}"
+                                        is_checked = st.checkbox(
+                                            f"Select {filename[:20]}...", 
+                                            key=checkbox_key,
+                                            help=f"Select to mark {filename} for removal"
+                                        )
+                                        
+                                        if is_checked:
+                                            st.session_state.files_to_delete.add(filename)
+                                        elif filename in st.session_state.files_to_delete:
+                                            st.session_state.files_to_delete.remove(filename)
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
             
             with tab2:
                 # Similarity analysis
@@ -1010,7 +1155,7 @@ def main():
                     # Export
                     csv = df.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="📥 Download Similarity Report",
+                        label="📥 Download Similarity Report (CSV)",
                         data=csv,
                         file_name="similarity_report.csv",
                         mime="text/csv",
@@ -1048,7 +1193,7 @@ def main():
                         # Export
                         csv_best = df_best.to_csv(index=False).encode('utf-8')
                         st.download_button(
-                            label="📥 Download Best Matches",
+                            label="📥 Download Best Matches (CSV)",
                             data=csv_best,
                             file_name="best_matches.csv",
                             mime="text/csv",
@@ -1056,11 +1201,11 @@ def main():
                         )
             
             with tab4:
-                # File management
-                st.markdown("### 🗂️ File Management")
+                # File management and export
+                st.markdown("### 📥 Export Results")
                 
                 if st.session_state.files_to_delete:
-                    st.warning(f"**{len(st.session_state.files_to_delete)} files selected for deletion**")
+                    st.warning(f"**🗑️ {len(st.session_state.files_to_delete)} files selected for removal**")
                     
                     # Show selected files
                     for filename in sorted(st.session_state.files_to_delete):
@@ -1082,53 +1227,72 @@ def main():
                                 <small>Size: {get_file_size(filepath)} | Matches: {original_file} ({similarity_score:.1f}%)</small>
                             </div>
                             """, unsafe_allow_html=True)
-                    
-                    # Confirmation
-                    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
-                    st.markdown("**⚠️ Important:** Files are marked for deletion but will not be deleted from your original zip file.")
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        if st.button("✅ Mark for Deletion", type="primary", use_container_width=True):
-                            # In a cloud environment, we can't actually delete from user's original zip
-                            # Instead, we can create a new zip without the marked files
-                            st.success(f"✅ {len(st.session_state.files_to_delete)} files marked")
-                    
-                    with col2:
+                
+                # Export options
+                st.markdown("#### 🚀 Export Options")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Clean archive download
+                    if st.button("📦 Download Clean Archive", use_container_width=True):
+                        with st.spinner("Creating clean zip file..."):
+                            # Create new zip without deleted files
+                            clean_zip_path = os.path.join(st.session_state.temp_dir, "clean_images.zip")
+                            with zipfile.ZipFile(clean_zip_path, 'w') as zipf:
+                                for root, dirs, files in os.walk(st.session_state.temp_dir):
+                                    for file in files:
+                                        if file.lower().endswith(SUPPORTED_EXTENSIONS):
+                                            file_rel_path = os.path.relpath(os.path.join(root, file), st.session_state.temp_dir)
+                                            if file_rel_path not in st.session_state.files_to_delete:
+                                                zipf.write(
+                                                    os.path.join(root, file),
+                                                    file_rel_path
+                                                )
+                            
+                            # Offer download
+                            with open(clean_zip_path, 'rb') as f:
+                                st.download_button(
+                                    label="⬇️ Download Clean Archive",
+                                    data=f,
+                                    file_name="clean_images.zip",
+                                    mime="application/zip",
+                                    use_container_width=True
+                                )
+                
+                with col2:
+                    # Clear selection
+                    if st.session_state.files_to_delete:
                         if st.button("🗑️ Clear Selection", use_container_width=True):
                             st.session_state.files_to_delete.clear()
                             st.rerun()
-                    
-                    with col3:
-                        if st.button("📥 Download Clean Zip", use_container_width=True):
-                            with st.spinner("Creating clean zip file..."):
-                                # Create new zip without deleted files
-                                clean_zip_path = os.path.join(st.session_state.temp_dir, "clean_images.zip")
-                                with zipfile.ZipFile(clean_zip_path, 'w') as zipf:
-                                    for root, dirs, files in os.walk(st.session_state.temp_dir):
-                                        for file in files:
-                                            if file.lower().endswith(SUPPORTED_EXTENSIONS):
-                                                file_rel_path = os.path.relpath(os.path.join(root, file), st.session_state.temp_dir)
-                                                if file_rel_path not in st.session_state.files_to_delete:
-                                                    zipf.write(
-                                                        os.path.join(root, file),
-                                                        file_rel_path
-                                                    )
-                                
-                                # Offer download
-                                with open(clean_zip_path, 'rb') as f:
-                                    st.download_button(
-                                        label="⬇️ Download Clean Archive",
-                                        data=f,
-                                        file_name="clean_images.zip",
-                                        mime="application/zip",
-                                        use_container_width=True
-                                    )
                 
-                else:
-                    st.info("👈 Select files to delete in the Visual Groups tab")
+                # Full report export
+                st.markdown("---")
+                st.markdown("#### 📄 Full Report Export")
+                
+                report_col1, report_col2 = st.columns(2)
+                
+                with report_col1:
+                    # Export all data as JSON
+                    import json
+                    report_data = {
+                        "archive_name": st.session_state.zip_filename,
+                        "image_count": st.session_state.image_count,
+                        "duplicate_groups": st.session_state.duplicates,
+                        "similarity_scores": st.session_state.similarity_scores,
+                        "best_matches": st.session_state.best_matches,
+                        "selected_for_removal": list(st.session_state.files_to_delete)
+                    }
+                    
+                    json_str = json.dumps(report_data, indent=2, default=str)
+                    st.download_button(
+                        label="📊 Download Full Report (JSON)",
+                        data=json_str,
+                        file_name="full_report.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
         
         elif st.session_state.scan_complete and not st.session_state.duplicates:
             st.markdown("""
@@ -1137,70 +1301,157 @@ def main():
                 <p style="font-size: 1.2em; color: #4D4D4D;">
                     Your image collection appears to be clean with no duplicate images.
                 </p>
+                <div style="margin-top: 20px;">
+                    <p style="color: #4D4D4D;">You can still download your images or start a new session.</p>
+                </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Export option even if no duplicates
+            if st.button("📦 Download Original Archive", use_container_width=True):
+                with st.spinner("Preparing download..."):
+                    clean_zip_path = os.path.join(st.session_state.temp_dir, "original_images.zip")
+                    with zipfile.ZipFile(clean_zip_path, 'w') as zipf:
+                        for root, dirs, files in os.walk(st.session_state.temp_dir):
+                            for file in files:
+                                if file.lower().endswith(SUPPORTED_EXTENSIONS):
+                                    file_rel_path = os.path.relpath(os.path.join(root, file), st.session_state.temp_dir)
+                                    zipf.write(
+                                        os.path.join(root, file),
+                                        file_rel_path
+                                    )
+                    
+                    with open(clean_zip_path, 'rb') as f:
+                        st.download_button(
+                            label="⬇️ Download Archive",
+                            data=f,
+                            file_name="original_images.zip",
+                            mime="application/zip",
+                            use_container_width=True
+                        )
         else:
             # Ready to scan
             st.markdown("""
-            <div style="text-align: center; padding: 40px; background: linear-gradient(135deg, rgba(0, 133, 113, 0.1), rgba(184, 209, 36, 0.1)); 
-                     border-radius: 15px; margin: 30px 0; border: 2px dashed #008571;">
-                <h3 style="color: #1E5050;">🚀 Ready to Scan</h3>
-                <p style="color: #4D4D4D; margin-bottom: 20px;">
-                    Click <strong>"Start Scan"</strong> in the sidebar to analyze your images!
+            <div class="welcome-card">
+                <h3 style="color: #1E5050; text-align: center;">🚀 Ready to Scan</h3>
+                <p style="color: #4D4D4D; margin-bottom: 20px; text-align: center;">
+                    You have <strong style="color: #008571;">{image_count}</strong> images ready for analysis.
+                    <br>Click <strong>"Start Scan"</strong> in the sidebar to begin!
                 </p>
+                <div style="display: flex; justify-content: center; gap: 15px; margin-top: 20px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 2em;">📦</div>
+                        <div style="font-weight: bold; color: #1E5050;">Archive</div>
+                        <div style="font-size: 0.9em; color: #4D4D4D;">{zip_filename}</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 2em;">🖼️</div>
+                        <div style="font-weight: bold; color: #1E5050;">Images</div>
+                        <div style="font-size: 0.9em; color: #4D4D4d;">{image_count} found</div>
+                    </div>
+                </div>
             </div>
-            """, unsafe_allow_html=True)
+            """.format(
+                image_count=st.session_state.image_count,
+                zip_filename=st.session_state.zip_filename[:30] + "..." if len(st.session_state.zip_filename) > 30 else st.session_state.zip_filename
+            ), unsafe_allow_html=True)
     
     else:
-        # Welcome screen
+        # Welcome screen - User-friendly introduction
         st.markdown("""
         <div style="text-align: center; padding: 40px; background: linear-gradient(135deg, #008571, #1E5050); 
                  color: white; border-radius: 20px; margin: 20px 0;">
             <h1 style="font-size: 2.8em; margin-bottom: 10px;">🔍 Smart Duplicate Image Finder</h1>
-            <p style="font-size: 1.3em; opacity: 0.9;">Upload zip files to find and manage duplicate images</p>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 40px 0;">
-            <div style="background: rgba(0, 133, 113, 0.1); padding: 25px; border-radius: 15px; border: 2px solid rgba(0, 133, 113, 0.3);">
-                <h3 style="color: #1E5050;">📦 Zip File Support</h3>
-                <p>Upload entire folders as zip files. No need to upload individual images.</p>
-            </div>
-            <div style="background: rgba(184, 209, 36, 0.1); padding: 25px; border-radius: 15px; border: 2px solid rgba(184, 209, 36, 0.3);">
-                <h3 style="color: #1E5050;">🎯 Smart Detection</h3>
-                <p>Uses perceptual hashing to find similar images, not just exact copies.</p>
-            </div>
-            <div style="background: rgba(237, 181, 0, 0.1); padding: 25px; border-radius: 15px; border: 2px solid rgba(237, 181, 0, 0.3);">
-                <h3 style="color: #1E5050;">📊 Detailed Analysis</h3>
-                <p>Get similarity percentages, visual comparisons, and downloadable reports.</p>
-            </div>
-        </div>
-        
-        <div style="background: white; padding: 30px; border-radius: 15px; border: 3px solid #008571; margin: 30px 0;">
-            <h3 style="color: #1E5050; text-align: center;">📝 How to Use</h3>
-            <ol style="font-size: 1.1em; line-height: 2; color: #4D4D4D;">
-                <li><strong>Compress your images</strong> - Create a zip file of your image folder</li>
-                <li><strong>Upload zip file</strong> - Use the uploader in the sidebar</li>
-                <li><strong>Configure settings</strong> - Choose detection method and similarity threshold</li>
-                <li><strong>Start scan</strong> - Click "Start Scan" to begin analysis</li>
-                <li><strong>Review results</strong> - View duplicates, select files, and download clean archive</li>
-            </ol>
+            <p style="font-size: 1.3em; opacity: 0.9;">Find and remove duplicate images in seconds</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Quick upload area
-        st.markdown("### 🚀 Quick Start")
-        st.markdown('<div class="upload-area">', unsafe_allow_html=True)
-        quick_zip = st.file_uploader(
-            "Drag and drop or click to upload a zip file",
-            type=['zip'],
-            key="quick_upload"
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
+        # Feature cards
+        st.markdown("### 🌟 Why Use Our Tool?")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            <div class="feature-card">
+                <div style="font-size: 3em; margin-bottom: 15px;">📦</div>
+                <h3 style="color: #1E5050; margin-bottom: 10px;">Easy Zip Upload</h3>
+                <p style="color: #4D4D4D; font-size: 0.95em;">
+                    Just zip your image folder and upload. No need to select individual files.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+            <div class="feature-card">
+                <div style="font-size: 3em; margin-bottom: 15px;">🎯</div>
+                <h3 style="color: #1E5050; margin-bottom: 10px;">Smart Detection</h3>
+                <p style="color: #4D4D4D; font-size: 0.95em;">
+                    Finds similar images, not just exact copies. Get similarity percentages for each match.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("""
+            <div class="feature-card">
+                <div style="font-size: 3em; margin-bottom: 15px;">🛡️</div>
+                <h3 style="color: #1E5050; margin-bottom: 10px;">Privacy First</h3>
+                <p style="color: #4D4D4D; font-size: 0.95em;">
+                    All files are processed temporarily and automatically deleted. Your privacy is protected.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # How it works section
+        st.markdown("""
+        <div style="background: white; padding: 30px; border-radius: 15px; border: 3px solid #008571; margin: 30px 0;">
+            <h3 style="color: #1E5050; text-align: center;">📝 How It Works</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px;">
+                <div style="text-align: center; padding: 20px;">
+                    <div style="background: rgba(0, 133, 113, 0.1); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; font-size: 1.5em;">
+                        1️⃣
+                    </div>
+                    <h4 style="color: #1E5050;">Compress & Upload</h4>
+                    <p>Zip your image folder and upload it using the sidebar</p>
+                </div>
+                <div style="text-align: center; padding: 20px;">
+                    <div style="background: rgba(0, 133, 113, 0.1); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; font-size: 1.5em;">
+                        2️⃣
+                    </div>
+                    <h4 style="color: #1E5050;">Configure Settings</h4>
+                    <p>Choose detection method and similarity threshold</p>
+                </div>
+                <div style="text-align: center; padding: 20px;">
+                    <div style="background: rgba(0, 133, 113, 0.1); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; font-size: 1.5em;">
+                        3️⃣
+                    </div>
+                    <h4 style="color: #1E5050;">Scan & Analyze</h4>
+                    <p>Let our algorithm find duplicate and similar images</p>
+                </div>
+                <div style="text-align: center; padding: 20px;">
+                    <div style="background: rgba(0, 133, 113, 0.1); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; font-size: 1.5em;">
+                        4️⃣
+                    </div>
+                    <h4 style="color: #1E5050;">Review & Export</h4>
+                    <p>View results and download clean archive</p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <p style="font-size: 1.1em; color: #4D4D4D;">
+                    <strong>Ready to start?</strong> Use the uploader in the sidebar to begin!
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Footer
     st.markdown("""
     <div class="footer">
-        <p>Smart Duplicate Image Finder v1.0 | All uploaded files are processed temporarily and automatically deleted</p>
+        <p>🛡️ <strong>Privacy Notice:</strong> All uploaded files are processed temporarily and automatically deleted after your session ends.</p>
+        <p style="font-size: 0.8em; margin-top: 10px;">Smart Duplicate Image Finder v2.0 | Made with ❤️ for organizing your photos</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1222,18 +1473,22 @@ if __name__ == "__main__":
         st.code("pip install pillow imagehash streamlit pandas numpy", language="bash")
     except Exception as e:
         st.error("❌ An unexpected error occurred")
-        st.exception(e)
         
-        # Provide troubleshooting tips
+        # User-friendly error message
         st.markdown("""
         <div class="warning-box">
             <strong>🛠️ Troubleshooting Tips:</strong>
             <ul>
-                <li>Refresh the page and try again</li>
+                <li><strong>Refresh the page</strong> and try again</li>
                 <li>Ensure your zip file is not corrupted</li>
-                <li>Try with a smaller number of images</li>
+                <li>Try with a smaller zip file (under 100MB)</li>
                 <li>Check that images are in supported formats</li>
-                <li>Ensure zip file size is under {MAX_ZIP_SIZE_MB}MB</li>
+                <li>Ensure zip file contains actual images</li>
             </ul>
+            <p style="margin-top: 10px;">If the problem persists, please try uploading a different zip file.</p>
         </div>
-        """.format(MAX_ZIP_SIZE_MB=MAX_ZIP_SIZE_MB), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        
+        # Optional: Show technical details in expander
+        with st.expander("Technical Details (for debugging)"):
+            st.exception(e)
